@@ -172,3 +172,122 @@ Como este es una ley de Semigroup, entonces mappend es tambien implementada como
 mconcat = foldr mappend mempty
 
 Note  que la razon de que mconcat use foldr en lugar de foldl es debido a la forma en que foldr puede trabajar con listas infinitas, mientras que  foldl forza la evaluacion.
+
+### 17.3.3 Practicando Monoides - contruyendo tablas de probabilidad
+Veamos un problema practico que puedas resolver con monoides. Crearemos tablas de probabilidad  para eventos y tendremos una forma facil de combinarlos. Comenzaremos viendo un simple tabla para un lanzamiento de moneda. Tenemos solo 2 eventos posibles: obtener la cara o la cruz.
+
+Tenemos una lista de Strings representando eventos y un lista de Doubles representando probabilidades
+```hs
+type Events = [String]
+type Probs = [Double]
+```
+La tabla de probabilidad es solo una lista de eventos en pares con una lista de probabilidades.
+```hs
+data PTable = PTable Events Probs
+```
+A continuacion necesitamos una funcion para crear una PTable. Esta funcion sera un constructor basico, per tambien asugurar que las probabilidades suman 1. Esto se logra facilmente dividiendo todas las probabilidades por la suma de probabilidades.
+```hs
+createPTable :: Events -> Probs -> PTable
+createPTable events probs = PTable events normalizedProbs
+   where totalProbs = sum probs
+         normalizedProbs = map (\x -> x / totalProbs) probs  
+```
+Si quieres ir mas lejos sin hacer PTable una instancia de Show. Primero deberias hacer un simple funcion que imprima una sola fila en tu tabla.
+```hs
+showPair :: String -> Double -> String
+showPair event prob = mconcat [event, "|", show prob, "\n"]
+```
+Nota que somos capaces de usra mconcat para combinar facilmente la lista de cadena. Previamente usamos el operador ++ para combiar cadenas. Usar mconcat no solo requiere menos tipeo, tambien provee un forma preferible de combinar strings. Esto es porque hay otros tipos que soportan mconcat, pero no ++.
+
+Para hacer PTable una instancia de Show, todo lo que tienes que hacer es usar zipWith  sobre la funcion showPair. Esta es la primera vez que vemos zipWith. Esta funcion trabaja haciendo zipping con 2 listas juntas y aplicando una funcion a estas listas. Aqui un ejemplo adicionando listas.
+```hs
+zipWith (+) [1,2,3] [4,5,6]
+[5,7,9] 
+```
+Ahora podemo usar zipWith para hacer PTable una instancia de Show
+```hs
+instance Show Ptable where
+   show (PTable events probs) = mconcat pairs
+      where pairs =  zipWith showPair events probs
+-- vemos que tenemos la configuracion basica necesaria
+createPTable ["caras", "cruces"] [0.5,0,5]
+caras | 0.5
+cruces | 0.5
+```
+Queremos ser capaces de modelar usando la clase de Tipo Monoid la combinacion de 2 o mas PTables. Por Ejemplo, si tenemos 2 monedas la salida seria
+```hs
+caras-cruz | 0.25
+caras-cruz | 0.25
+caras-cruz | 0.25
+caras-cruz | 0.25
+```
+Esto requiere generar una combinacion de todos los eventos y todas las probabilidades. Esto se llama producto cartesiano. Comenzaremos con un forma generica de combinar el producto Cartesiano de 2 listas con una funcion. la funcion cartCombine toma 3 argumentos: una funcion par combinar 2 listas, y 2 listas.
+```hs
+cartCombine :: (a -> b -> c) -> [a] -> [b] -> [c]
+cartCombine func l1 l2 = zipWith func newL1 cycledL2
+   where nToAdd = length l2 -- repetimos cada elemento de la 1ra para la 2da
+         repeatedL1 = map (take nToAdd . repeat) l1
+         newL1 = mconcat repeatedL1 -- trata con una lista de listas a juntar
+         cycledL2 = cycle l2 -- ciclamos la 2da lista usamos zipWith para comb.
+```
+Entonces tus funciones para combinar eventos y combinar probabilidades son casos especificos de cartCombine
+```hs
+combineEvents :: Events -> Events -> Events
+combineEvents e1 e2 = cartCombine combiner e1 e2
+   where combiner = (\x y -> mconcat [x,"-",y]) -- cuando combinamos eventos
+
+combineProbs :: Probs -> Probs -> Probs
+combineProbs p1 p2 = cartCombine (*) p1 p2  -- combinamos probabilidades
+```
+Con *combineEvent* y *combineProbs* ahora podemos hacer PTable una instancia de Semigroup.
+```hs
+instance Semigroup PTable where
+   (<>) ptable1 (PTable [] []) = ptable1 -- manejo de casos especiales
+   (<>) (PTable [] []) ptable2  = ptable2
+   (<>) (PTable e1 p1) (PTable e2 p2) = createPTable newEvents newProbs
+      where newEvents = combineEvents e1 e2
+            newProbs = combine Probs p1 p2
+```
+Finalmente, podemos implementar la clase de tipo Monoide. Para esta clase, sabemos que mappend y <> son lo mismo. Todo lo que hay que hacer es determinar la identidad, mempty element. En este caso, es PTable [] [] Aqui una instamcia de Monoid para PTable
+```hs
+instance Monoid PTable where
+   mempty = PTable [] []
+   mappend = (<>)
+```
+No olvides: ganaste el poder de mconcat sin esfuerzo!
+
+Vemos como todo este trabajo, permite crear 2 PTables. La primera es una simple moneday la otra es un color spinner con diferentes probabilidades para cada spinner
+```hs
+coin :: PTable
+coin = createPTable ["heads", "tails"] [0.5,0.5]
+
+spinner :: PTable
+spinner = createPTable ["red", "blue", "green"] [0.1,0.2,0.7]
+```
+Si queremos conocer la probabilidad de hallar tails en la moneda y azul en el spinner, podemos usar el operador <>:
+```hs
+coin <> spinner
+heads-red | 5.0e-2
+heads-blue | 0.1
+heads-green | 0.35
+tails-red | 5.0e-2
+tails-blue | 0.1
+tails-green | 0.35
+```
+Para tu salida, puedes cer que esta es 0.1 o un 10% de probabilidad de tener tails y tener el azul.
+
+Que hay de la probabilidad de tener heads tres veces en una fila? Podemos usar mconcat para hacerlo mas facil:
+```hs
+mconcat [coin,coin,coin]
+heads-heads-heads|0.125
+heads-heads-tails|0.125
+heads-tails-heads|0.125
+heads-tails-tails|0.125
+tails-heads-heads|0.125
+tails-heads-tails|0.125
+tails-tails-heads|0.125
+tails-tails-tails|0.125
+```
+En este caso, cada salida tiene la misma probabilidad de 12.5%
+Inicialmente, la idea de abstraer "combinar cosas" podria parecer demasiado abastracta.
+Una vez que comencemos a ver problemas en termino de monoides, es remarcable ver como aparecen todos los dias. Monoides son una gran demostracion de el poder de pensar los tipos cuando escribimos codigo.
