@@ -167,7 +167,7 @@ Nota que estamos especificando el tipo concreto de la tupla: (String, Int)
 Otra cosa que los tipos de Haskell tienen en comun con las funciones y datos es que ellos tienen sus propios tipos tambien. Este tipo de un tipo es llamado **kind**. Como deberias esperar kinds son abstractos. Pero ellos se han elevado en profundidad en las clases de tipos mas avanzadas cubiertos en la unidad 5.
 El *kind de un type* indica el numero de parametros que los tipos toman, que son expresados unsaod un asterisco (\*). Pueden no tener parametros teniendo un tipo de \* , tipos que toman un parametro tienen el tipo *->*, tipos con mas de 2 parametros tienen el tipo \*->\*->\*, etc.
 
-En GHCi, usamos el comando :kind para buscar los kinds de cualquier tipo si no estas seguro de el:
+En GHCi, usamos el comando :kind para buscar los kinds de cualquier tipo si no estas seguro de el (no olvides importar Data.Map):
 ```hs
 GHCi> :kind Int
 Int :: *
@@ -189,7 +189,58 @@ Triple Char :: *
 ```
 Kinds pueden inicialmente paracer abstractos sin sentido. Pero entender kinds puede ser util cuando tratamos de hacer instancias de clases de tipos tales como Functor y Monad (cubierto en la unidad 5)
 
+### 18.2.3 Data.Map
+Otro tipo parametrizado util es el Map de Haskell (no confundir con la funcion map). Para usar Map, primero hay que importar Data.Map. Porque el modulo Data.Map  comparte algunas funciones con Prelude, vamos ha hacer una importacion cualificada. Para realizar una importacion cualificada,  adicionamos los detalles dados abajo al principio del archivo.
+```
+import qualified Data.Map as Map --  damos al modulo importado un nombre para evitar conflictos con funciones existentes.
+```
+Con la importacion cualificada, toda funcion y tipo del modulo debe ser prefijado con Map. Map permite buscar valores usando una clave. En muchos otros lenguajes, este tipo de dato es llamado Dictionary. El tipo parametrizado Map son los tipos de las claves y valores. A diferencia de List's y Tuple's, la implementacion de Map's  es no trivial. La mejor forma para entender este tipo es a traves de un ejemplo concreto.
 
+Digamos que trabajamos en un laboratorio de un cientifico loco y tenemos una lista de numeros que corresponden a varios organos usados para crear horribles monstruos. Puedes comenzar haciendo un tipo suma de partes de cuerpo relevantes.
+```hs
+data Organ = Heart | Brain | Kidney | Spleen deriving (Show, Eq)
+```
+Supon que en tu inventario tienes los siguientes organos. (Duplicados estan bien; Nunca tenemos basos suficientes!)
+```hs
+organs :: [Organ]
+organs = [Heart, Heart, Brain, Spleen, Spleen, Kidney]
+```
+Ahora cada organo es colocado en una gabeta numerado para ser devuelto un tiempo despues. Cada gabeta tiene un numero encima. Como las gabetas se usan para buscar items, cada numero debe ser unico. Adicionalmente, es importante que  cualquier ID que uses, este debe ser de la clase Ord. Si las gabetas no tienen orden, sera dificil buscar un organo eficientemente.
 
+#### Mapas y tablas hash
+* Mapas son similares a otro tipo de estructura llamada un tabla hash. Ambos permiten buscar valores con claves. La gran diferencia entre estas 2 estructuras es la forma en que los valores son buscados. En una tabla hash, una funcion transforma la llave en el indice de un array donde el valor esta almacenado. Esto permite una rapida busqueda de items, pero requiere una gran cantidad de memoria para almacenar y para prevenir colisiones. Un map busca los valores usando una busqueda de arbol binario. Esto es mas lento que una tabla hash pero todavia es rapido. El map busca valores  por la busqueda de claves necesitan tener la propiedad de ser de la clase Ord. Asi puedes comparar 2 claves y encontrarlos eficientemente en un arbol*
 
+Aqui tenemos una lista de ID's (no todas las gabetas tienen un organo)
+```hs
+ids :: [Int]
+ids = [2,7,13,14,21,24]
+```
+Con los organis y los ID's, tienes toda la informacion necesaria para construir un Map! Esto nos servira como un catalogo de las gabetas y ver facilmente que items estan en que gabetas.
+La forma mas comun de construir un Map es con la funcion fromList. Usando :t en GHCi, pueder ver el tipo de fromList como se muestra en la figura 18.4.
+Ahora podemos ver el tipo parametrico para tu tipo mapa Map:k y a , Lo que es interesante aqui es que el tipo de la clave, k, debe ser de la clase Ord. Esta restriccion es debido a la forma en que las claves son almacenadase buscadas internamente. La otra cosa a notar es que fromList espera una lista de tuplas, que representa pares clave valor. Puedes reescribir tus dos lista de la siguiente forma.
+```hs
+fromList :: Ord k => [(k,a)] -> Map k a
+
+pairs = [(2,Heart),(7,Heart),(13,Brain)...]
+```
+Pero para listas suficientemente largas, esto es un dolor de cabeza! En su lugar, puedes usar la funcion zip de la leccion 6. La funcion zip toma 2 listas y retorna una lista de pares.
+```hs
+organPairs :: [(Int,Organ)]
+organPairs = zip ids organs
+
+-- Tenemos todas las partes, ponemos todo en el catalogo
+
+organCatalog :: Map.Map Int Organ
+organCatalog = Map.fromList organPairs
+```
+Finalmente podemos buscar in item usando Map.lookup. Cuando haces esto en GHCi, conseguimos un interesante resultado:
+```hs
+Map.lookup 7 organCatalog
+Just Heart
+```
+Obtenemos Heart como se esperaba, pero este es precedido por el constructor de datos Just. So buscas la signatura del tipo para Map.lookup, obtendras la respuesta.
+```hs
+Map.lookup :: Ord k => k -> Map.Map k a -> Maybe a
+```
+Map.lookup returna un nuevo tipo parametrizado: Maybe.Maybe es simple pero poderoso tipo que es sujeto de la siguiente leccion.
 
