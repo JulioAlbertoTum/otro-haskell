@@ -195,3 +195,113 @@ tsAll :: TS Double
 tsAll = mconcat [ts1,ts2,ts3,ts4]
 ```
 Aunque esto toma un poco de trabajo llegar aqui, para todos los datos de series temporales futuras con las que trabajes, tenemos una manera de segura de combinar archivos separados en un solo tipo TS.
+
+## 20.3 Realizando calculos en tus series de tiempo
+Tus series de datos no seran de ayuda si no eres capaz de hacer analiticas basicas con ellos. La primera razon es que la series temporales son usadas en analiticas para entender la tendencia general y cambios sobre los valores que estamos grabando. Incluso preguntas simples sobre series de tiempo pude ser complicada porque los datos de series temporales raramente representan una bonita y recta linea. Para comenzar analizamos tus datos de series temporales, vamos a ver una simple estadistica de sumario. Una estadistica de sumario es una pequeno numero de valores que ayudan a resumir un conjunto de datos mas completo. La estadistica de resumen mas comun para todos los datos es el promedio. En esta seccion, veremos el calculo del promedio de tus datos, asi tambien encontraremos cual es el valor mas alto y el mas bajo de tus datos asi como de donde son ellos.
+
+Lo primero que queremos es calcular el significado de los valores en tu serie temporal. Tu funcion meanTS tomara Ts parametrizado con un tipo Real y retornara el significado de los valores en un TS como un Double. La clase de tipo Real permite  usar la fucnion realToFrac para hacer mas facil dividir tipos tales como Integer.Tu significado tendra un tipo Maybe de retorno porque en 2 instancias puede no haber resultados significantes: una linea de tiempo vacia  y una serie de tiempos en que todos los valores son Nothing.
+Necesitas una funcion para calcular el significado de una linea.
+```hs
+mean :: (Real a) => [a] -> Double
+mean xs =  total / count
+   where total = (realToFrac . sum) xs
+         count = (realToFrac . length) xs
+
+-- Puedes usar  esto a tu funcion meanTS 
+
+meanTS :: (Real a) => TS a -> Maybe Double
+meanTS (TS _ []) = Nothing
+meanTS (TS times values) = if all (== Nothing) values
+                           then Nothing
+                           else Just avg
+    where justVals = filter isJust values
+          cleanVals = map fromJust justVals
+          avg = mean cleanVals 
+```
+### 20.3.1 Calculando el valor min y el valor max para tu serie de tiempo.
+Conocer el maximo y el minimo de tus series de tiempo podria ser util tambien. No solo querras conocer el valor que representan el min y el max, si no tambien el tiempo en el que pasa. Como maxTS y minTS van a ser muy parecidos excepto en sus comparaciones, deberiamos hacer un compareTS generico que tome una funcion (a->a->a) (una funcion como max que compara 2 valores y retorna al ganador). Es interesante que tu comparacion tiene la signatura de tipo que es exactamente la misma que Semigroup (<>). Pero esta signatura de tipo  no son suficientes para darnos la historia completa. Tipicamente, quieres usar Semigroup (y Monoid) para abstraer la combinacion de 2 tipos en lugar de compararlos.
+
+De nuevo, estas atrapado con el problema que tienes que compara el tipo (a -> a -> a), pero con la que vas a querer comparar tipos (Int, Maybe a). Esto es porque quieres guardar un rastro del valor y el tiempo del valor pasado. Pero hay que tener cuidado en la comparacion de valores. Para hacer esto mas facil, escribiremos una funcion makeTSCompare que toma una funcion de comparacion (a -> a -> a) y transforma esta dentro una funcion de tipo ((Int, Maybe a) -> (Int, Maybe a) -> (Int, Maybe a)). Puedes transformar cualquier funcion tales como min o max y trabajar con tuplas (Int, Maybe a).
+```hs
+makeTSCompare :: Eq a => CompareFunc a -> TSCompareFunc a
+makeTSCompare func = newFunc
+    where newFunc (i1, Nothing) (i2, Nothing) = (i1, Nothing)
+          newFunc (_, Nothing) (i1, val) = (i, val)
+          newFunc (i, val) (_, Nothing) = (i, val)
+          newFunc (i1, Just val1) (i2, Just val2) = if func val1 val2 = val1
+                                                    then (i1, Just val1)
+                                                    else (i2, Just val2)
+``` 
+Cin makeTSCompare, podremos usar usar funciones de comparacion tales como min o max, o cualquier otra funcion similar. Como un ejemplo, permitenos comparar dos pares clave valor.
+```hs
+GHCi> makeTSCompare max (3,Just 200) (4, Just 10)
+=> (3,Just 200)
+```
+Ahora podemos construir una funcion generica compareTS que permita comparar todos los valores en un tipo TS.
+```hs
+compareTS :: Eq a => (a -> a -> a) -> TS a -> Maybe (Int, Maybe a)
+compareTS func (TS [] []) = Nothing
+compareTS func (TS times values) = if all (== Nothing) values
+                                   then Nothing
+                                   else Just best
+    where pairs = zip times values
+          best = foldl (makeTSCompare func) (0, Nothing) pairs
+```
+compareTS permite crear otras funciones de comparacion para TS. Aqui esta max y min
+```hs
+minTS :: Ord a => TS a -> Maybe (Int, Maybe a)
+minTS = compareTS min 
+
+maxTS :: Ord a => TS a -> Maybe (Int, Maybe a)
+maxTS = compareTS max
+
+-- En la consola
+GHCi> minTS tsAll
+=> Just (4,Just 198.9)
+   maxTS ts1
+=> Just (12,Just 202.9)
+``` 
+Con unas estadisticas basicas para trabajar podemos movernos a una analisis de datos mas avanzados.
+
+## 20.4 Transformando series de tiempo
+El resumen de estadisticas basicas puede ser de utilidad pero no cubren todos los detalles que queremos conocer sobre una serie de tiempo. En este caso los datos de venta mensuales, deberiamos querer asegurar que la compania esta creciendo. Como las series de tiempos no son solo lineas rectas, Puede ser sorprendentemente dificil responder preguntas como, "Cuan rapido las ventas crecen?" El enfoque mas simple es no solo ver los valores de las series de tiempo, pero como los valores cambian en el tiempo. Otro problema es que las series de tiempo son ruidosas. Para reducir el ruido, realizaremos una tarea llamada smoothing, que intenta remover el ruido de los datos para hacer los dats mas faciles de ententer. Ambas tareas son una forma de transformar tus datos originales asi que puedes extraer mas ideas de esto.
+
+La primera transformacion que vamos a ver sera buscando la diff de un TS. El diff indica el cambio en cada dia. Di por ejemplo que tenemos los valores de la grafica 20.3
+
+Note que tu lista es un valor mas chico que el anterior. Esto ocurre porque no hay nada de substraer del primer valor. Tenemos que asegurar que adicionamos un valor Nothing al comienzo del resultado TS para reflejar esto. Permitenos ver el efecto que una transformacion diff tiene sobre las series temporales.
+
+En terminos de tipos, la transformacion diff puede ser expresada limpiamente como sigue.
+```hs
+TS a -> TS a
+```
+Esta no es una descripcion perfecta de lo que queremos que sea el resultado final. Tu tipo TS puede tomar cualquier parametro para el tipo de sus valores, pero no todos los valores pueden ser substraidos de otro, tu transformacion deberia des de cualquier tiepo Num porque todos los tipos Num pueden ser sustraidos de un otro.
+```hs
+Num a => TS a -> TS a
+```
+Con tu tipo signatura revisada, seremos mas especificos sobre que tipo de transformacion exactamente estamos permitiendo.
+
+Una vez que hagamos correr el problema: estaremos trabajando con valores Maybe cuando querramos realizar una operacion sobre el tipo Num a dentro de Maybe. Como teniamos antes, comenzaremos con una funcion diffPair que toma 2 valores Maybe a y los substrae uno del otro.
+```hs
+diffPair :: Num a => Maybe a -> Maybe a -> Maybe a 
+```
+Si un valor es Nothing, vamos a retornar Nothing; en otro caso, retornaremos la diferencia.
+```hs
+diffPair Nothing _ = Nothing
+diffPair _ Nothing = Nothing
+diffPair (Just x) (Just y) = Just (x - y)
+```
+Ahora podemos crear diffTS. Puedes usar zipWith para hacer esto facilmente. la funcion zipWith trabajo como lo hace zip, pero en lugar de combinar 2 valores dentro de una tupla, este los combina con una funcion.
+```hs
+diffTS :: Num a => TS a -> TS a 
+diffTS (TS [] []) = TS [] []
+diffTS (TS times values) = TS times (Nothing:diffValues)
+    where shiftValues = tail values
+          diffValues = zipWith diffPair shiftValues values
+```
+Con diffTS, puedes ver el cambio signficativo en tus ventas todo el tiempo
+```hs
+GHCi> meanTS (diffTS tsAll)
+=> Just 0.6076923076923071
+```
+Sobre la mdia tus ganancias han crecido  un 0.6 cada mes. Lo mos importante sobre esto es que puedes usar esta herramienta sin preocuparte de los valores faltantes.
+
