@@ -305,3 +305,53 @@ GHCi> meanTS (diffTS tsAll)
 ```
 Sobre la mdia tus ganancias han crecido  un 0.6 cada mes. Lo mos importante sobre esto es que puedes usar esta herramienta sin preocuparte de los valores faltantes.
 
+### 20.4.1 Moviendonos sobre el promedio
+Otra transformacion importante  de datos de series de tiempo es el suavizado. Muchos datos de tiempo tienen picos ruidosos, gotas inexplicables, y otro ruido aleatorio que hace mas dificil entender los datos. Otro problema es la estacionalidad en los datos. Supon que tenemos datos semanales; Se esperaria que las ventas sean buenas entre domingo hasta el martes?  Tu no quieres estacionalidad de los datos que afecten como los entendemos.
+
+La mejor forma de suavizar es moviendo el promedio. Mover el promedio es similar a diff, pero en lugar de ver solo 2 numeros de un tiempo, promediaremos sobre la ventana completa. Un promedio movil toma un parametro n para el numer ode items sobre los cuales se suavizara. Aqui un ejemplo de mover el promedio de 3 tomado de 6 numeros
+```hs
+1,2,3,4,3,2
+2.000000 3.000000 3.333333 3.000000
+```
+Para visualizar los efectos de este suavizado, la figura muestra la serie de tiempo original con un movimiento de promedio de 12 aplicado.
+
+Note que al final tenemos n/2 de valores faltantes. Para diff, adicionamos un solo Nothing al comienzo de tus datos, pero para un movimiento de promedios, nos gustara hacer un centro de los datos, adicionando NA (o Nothing, en este caso) valores para ambos finales.
+
+La signatura de tipo de la funcion movingAverageTS va a ser mas restrictiva que la funcion  diffTS. Porque sabemos que estamos usando la funcion mean para promediar numeros, puedes ver el tipo de signatura ayuda a descifrar la signatura del tipo final  para movingAverageTS:
+```hs
+mean :: (Real a) => [a] -> Double
+```
+Como mean hara la mayoria del trabajo para calcular el movimiento del promedio, sabemos que la signatura final del tipo involucrara una transformacion (Real a) => TS a  en un tipo TS Double. Necesitamos un valor mas para tu signatura de tipos. Necesitas especificar el numero de valores que quieres suavizar. Esto significa la signatura de tipo final sera:
+```
+movingAverageTS :: (Real a) => TS a -> Int -> TS Double
+```
+Con un mejor sentido de nuestra meta, podemos comenzar a construir las funciones que estaran aqui.
+
+Para hacer las cosas mas faciles para razonar, abstraeremos solo la parte de la funcion del promedio movible que trabajara con una lista de [Maybe a], tus valores de la serie de tiempos.
+```hs
+meanMaybe :: (Real a) => [Maybe a] -> Maybe Double
+meanMaybe vals = if any (== Nothing) vals
+                 then Nothing
+                 else (Just avg)
+    where avg = mean (map fromJust vals)
+```
+Ahora puedes escribir la logica principal para calcular el promedio movible
+```hs
+movingAvg :: (Real a) => [Maybe a] -> Int -> [Maybe Double]
+movingAvg [] n = []
+movingAvg vals n = if length nextVals == n 
+                   then meanMaybe nextVals:movingAvg restVals n 
+                   else []
+    where nextVals = take n vals
+          restVals = tail vals
+```
+Con estas dos funciones tomaremos el control del trabajo, la ultima cosa por la que necesitamos preocuparnos es asegurarte que tu TS final este "centrada" Por esto usaremos division entera con div para dar un numero entero como punto medio.
+```hs
+movingAverageTS :: (Real a) => TS a -> Int -> TS Double
+movingAverageTS (TS [] []) n = TS [] []
+movingAverageTS (TS times values) n = TS times smoothedValues
+    where ma = movingAvg values n 
+          nothings = replicate (n `div` 2) Nothing 
+          smoothedValues = mconcat [nothings,ma,nothings]
+```
+Con movingAverageTS, puedes suavizar tus datos.
